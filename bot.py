@@ -29,7 +29,7 @@ from highlights import Clip, plan_teaser, research_film
 from media import MediaError
 from render import output_size, render_teaser
 
-VERSION = "2.5"
+VERSION = "2.5.1"
 
 settings.ensure_dirs()
 LOG_FILE = settings.data_dir / "bot.log"

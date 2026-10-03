@@ -1,3 +1,6 @@
+# Loyiha nomi qat'iy belgilangan - serverdagi boshqa botlar (masalan slaydbot) bilan aralashmaydi
+name: kinobot
+
 services:
   # Lokal Telegram Bot API server - 2 GB gacha fayllarni qabul qilish uchun
   telegram-bot-api:

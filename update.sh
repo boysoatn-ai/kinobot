@@ -12,6 +12,15 @@ if [ -d "$SRC/.git" ] && [ "${1:-}" != "--pulled" ]; then
 fi
 
 echo ">> Yangi kod o'rnatilmoqda..."
+# Xavfsizlik: /root/kinobot da boshqa loyiha (masalan slaydbot) turgan bo'lsa - hech narsaga tegmaymiz
+if [ -f "$APP/docker-compose.yml" ] && ! grep -q "telegram-bot-api" "$APP/docker-compose.yml"; then
+  echo "!! $APP papkasida boshqa loyiha turibdi - to'xtatildi, hech narsa o'zgartirilmadi."
+  exit 1
+fi
+if [ ! -f "$APP/.env" ]; then
+  echo "!! $APP/.env topilmadi (bot tokeni va kalitlar). Avval setup.sh bilan sozlang."
+  exit 1
+fi
 cd "$APP"
 # Eski versiyaning keraksiz fayllari
 rm -f instagram.py pipeline.py Caddyfile .env.example README.md
