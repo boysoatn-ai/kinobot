@@ -11,7 +11,9 @@ Bosqichlar:
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -85,6 +87,43 @@ def _ts(t: float) -> str:
     h, r = divmod(t, 3600)
     m, s = divmod(r, 60)
     return f"{h}:{m:02}:{s:02}" if h else f"{m}:{s:02}"
+
+
+def _call_tool(stage: str, system: str, content, tool: dict, max_tokens: int, images: int = 0) -> dict:
+    """Claude'dan javobni `tool` orqali (aniq JSON) oladi.
+
+    Yangi modellar (masalan Sonnet 5.5) majburiy tool_choice ("tool"/"any") ni qo'llab-quvvatlamaydi,
+    shuning uchun tool_choice="auto" ishlatiladi: model vositani o'zi chaqiradi. Chaqirmasa - matndagi
+    JSON olinadi yoki eslatma bilan qayta so'raladi (ko'pi bilan 3 urinish).
+    """
+    name = tool["name"]
+    required = tool["input_schema"].get("required", [])
+    messages: list[dict] = [{"role": "user", "content": content}]
+    client = _client()
+    for attempt in range(3):
+        resp = client.messages.create(
+            model=settings.claude_model, max_tokens=max_tokens, system=system,
+            tools=[tool], tool_choice={"type": "auto"}, messages=messages)
+        usage.record(stage, resp, images=images if attempt == 0 else 0)
+        for block in resp.content:
+            if block.type == "tool_use" and block.name == name and isinstance(block.input, dict):
+                return block.input
+        # Zaxira: model JSON ni oddiy matn sifatida yozgan bo'lishi mumkin
+        text = "".join(getattr(b, "text", "") for b in resp.content if b.type == "text")
+        m = re.search(r"\{.*\}", text, re.S)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                if isinstance(data, dict) and all(k in data for k in required):
+                    return data
+            except ValueError:
+                pass
+        log.warning("%s: model %s vositasini chaqirmadi (stop=%s), qayta so'ralmoqda", stage, name, resp.stop_reason)
+        messages = messages + [
+            {"role": "assistant", "content": resp.content},
+            {"role": "user", "content": f"Javobni hozir faqat {name} vositasini chaqirib ber. Boshqa matn yozma."},
+        ]
+    raise RuntimeError(f"AI {name} natijasini qaytarmadi (3 urinish)")
 
 
 def _tool_input(resp, name: str) -> dict:
@@ -244,12 +283,7 @@ Sahna almashinuvi zich joylar (harakat, jang, quvish):
 To'liq nutq matni:
 {_transcript_text(an.segments, limit_end) or "(nutq topilmadi - ovoz va sahna xaritasidan foydalan)"}"""
 
-    resp = _client().messages.create(
-        model=settings.claude_model, max_tokens=4000, system=STORY_SYSTEM,
-        tools=[STORY_TOOL], tool_choice={"type": "tool", "name": "submit_story"},
-        messages=[{"role": "user", "content": user}])
-    usage.record("story", resp)
-    data = _tool_input(resp, "submit_story")
+    data = _call_tool("story", STORY_SYSTEM, user, STORY_TOOL, max_tokens=8000)
     story = Story(genre=str(data.get("genre", ""))[:100], protagonist=str(data.get("protagonist", ""))[:300],
                   hook_question=str(data.get("hook_question", ""))[:300], tone=str(data.get("tone", ""))[:100],
                   spoiler_notes=str(data.get("spoiler_notes", ""))[:500])
@@ -358,12 +392,8 @@ Quyida nomzodlar: raqami, vaqti, nega tanlangani, o'sha paytdagi gaplar va KADRI
         if c.frame:
             content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                          "data": frame_to_b64(c.frame)}})
-    resp = _client().messages.create(
-        model=settings.claude_model, max_tokens=3000, system=DIRECT_SYSTEM,
-        tools=[DIRECT_TOOL], tool_choice={"type": "tool", "name": "submit_teaser"},
-        messages=[{"role": "user", "content": content}])
-    usage.record("direct", resp, images=sum(1 for c in content if c.get("type") == "image"))
-    return _tool_input(resp, "submit_teaser")
+    return _call_tool("direct", DIRECT_SYSTEM, content, DIRECT_TOOL, max_tokens=6000,
+                      images=sum(1 for c in content if c.get("type") == "image"))
 
 
 # ----------------------------------------------------------------- 3. tekshirish
@@ -475,8 +505,12 @@ def plan_teaser(video: Path, workdir: Path, an: Analysis, title: str, seconds: i
             return TeaserPlan(clips, str(data.get("hook", ""))[:80], str(data.get("ending", ""))[:90],
                               summary, "ai+vision")
         log.warning("AI rejasi yaroqsiz (%d bo'lak), zaxira usul", len(clips))
-    except anthropic.APIStatusError:
-        raise
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError):
+        raise  # kalit muammosi - foydalanuvchi bilishi shart
+    except anthropic.APIStatusError as e:
+        if "credit" in str(e).lower() or "balance" in str(e).lower():
+            raise  # hisobda pul tugagan
+        log.exception("AI xizmati xatosi, zaxira usulga o'tilmoqda: %s", e)
     except Exception as e:
         log.exception("AI rejissyor xatosi: %s", e)
 
