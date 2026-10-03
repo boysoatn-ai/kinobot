@@ -17,7 +17,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.filters import Command
-from aiogram.types import (CallbackQuery, FSInputFile, InlineKeyboardButton,
+from aiogram.types import (CallbackQuery, ErrorEvent, FSInputFile, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 
 import db
@@ -29,7 +29,7 @@ from highlights import Clip, plan_teaser, research_film
 from media import MediaError
 from render import output_size, render_teaser
 
-VERSION = "2.3"
+VERSION = "2.4"
 
 settings.ensure_dirs()
 LOG_FILE = settings.data_dir / "bot.log"
@@ -593,8 +593,13 @@ async def on_film(m: Message) -> None:
                                "Yana bir bor yuborib ko'ring; muammo takrorlansa xabar bering.")
         return
 
-    film_id = db.add_film(m.chat.id, title, str(dest))
-    job_id = enqueue(film_id, seconds)
+    try:
+        film_id = db.add_film(m.chat.id, title, str(dest))
+        job_id = enqueue(film_id, seconds)
+    except Exception as e:
+        log.exception("Filmni navbatga qo'shib bo'lmadi")
+        await status.edit_text(f"❌ Filmni navbatga qo'shib bo'lmadi: {type(e).__name__}: {str(e)[:200]}")
+        return
     progress_msgs[job_id] = (status.chat.id, status.message_id)
     ahead = queue.qsize() - 1
     await status.edit_text(f"✅ «{title}» qabul qilindi. {seconds} soniyalik tizer tayyorlanadi."
@@ -626,6 +631,20 @@ async def fallback(m: Message) -> None:
 
 
 # ------------------------------------------------------------------ ishga tushirish
+@router.errors()
+async def on_error(event: ErrorEvent) -> bool:
+    """Har qanday kutilmagan xato - logga yoziladi va sizga darhol xabar qilinadi (jim qolmaydi)."""
+    e = event.exception
+    log.error("Kutilmagan xato: %s", e, exc_info=e)
+    text = f"⚠️ Botda kutilmagan xato:\n{type(e).__name__}: {str(e)[:500]}\n\nBatafsil: /logs"
+    for uid in settings.admin_ids:
+        try:
+            await bot.send_message(uid, text)
+        except Exception:
+            pass
+    return True
+
+
 async def main() -> None:
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()

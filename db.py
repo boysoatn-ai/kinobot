@@ -1,11 +1,14 @@
 """SQLite: filmlar va tizer buyurtmalari holati (qayta ishga tushganda davom etish uchun)."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
 
 from config import settings
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS films (
@@ -81,6 +84,16 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 def init() -> None:
     with connect() as c:
+        # 1-versiya (Instagram'li) qoldirgan bazada films jadvali boshqacha tuzilgan
+        # (chat_id, deleted ustunlari yo'q). Uni chetga olib, yangisini yaratamiz.
+        cols = [r[1] for r in c.execute("PRAGMA table_info(films)")]
+        if cols and "chat_id" not in cols:
+            log.warning("Eski (v1) baza topildi - films/clips jadvallari *_v1 nomi bilan arxivlanadi")
+            c.execute("DROP TABLE IF EXISTS films_v1")
+            c.execute("ALTER TABLE films RENAME TO films_v1")
+            if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='clips'").fetchone():
+                c.execute("DROP TABLE IF EXISTS clips_v1")
+                c.execute("ALTER TABLE clips RENAME TO clips_v1")
         c.executescript(SCHEMA)
         for m in _MIGRATIONS:  # eski bazani yangi ustunlar bilan to'ldirish
             try:

@@ -112,10 +112,16 @@ def analyze(video: Path, workdir: Path,
     segments: list[Segment] = []
     loud: list[float] = []
 
+    # Filmning oxirgi qismi (spoyler zonasi) tizerda hech qachon ishlatilmaydi - uni tinglash shart emas.
+    # Bu 2 soatlik filmda 15-20 daqiqa tejaydi.
+    listen_until = info.duration
+    if info.duration > 600:
+        listen_until = min(info.duration, info.duration * settings.spoiler_guard + 30)
+
     if info.has_audio:
         wav = workdir / "audio.wav"
         try:
-            extract_audio(video, wav)
+            extract_audio(video, wav, listen_until if listen_until < info.duration else None)
             audio = _read_wav(wav)
         finally:
             wav.unlink(missing_ok=True)
@@ -136,7 +142,7 @@ def analyze(video: Path, workdir: Path,
                 segments.append(Segment(round(s.start, 2), round(s.end, 2), text))
             if progress and s.end - last_report >= 30:
                 last_report = s.end
-                progress("speech", min(s.end / info.duration, 0.99))
+                progress("speech", min(s.end / listen_until, 0.99))
         del audio
 
     result = Analysis(duration=info.duration, width=info.width, height=info.height,

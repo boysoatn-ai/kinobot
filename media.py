@@ -58,7 +58,10 @@ def probe(path: Path) -> VideoInfo:
     return VideoInfo(duration=duration, width=w, height=h, has_audio=has_audio)
 
 
-def extract_audio(video: Path, wav: Path) -> None:
-    """16 kHz mono 16-bit WAV (Whisper uchun)."""
-    run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", str(video), "-map", "0:a:0",
-         "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+def extract_audio(video: Path, wav: Path, limit: float | None = None) -> None:
+    """16 kHz mono 16-bit WAV (Whisper uchun). limit - faqat shu soniyagacha."""
+    cmd = ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", str(video), "-map", "0:a:0",
+           "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"]
+    if limit:
+        cmd += ["-t", f"{limit:.1f}"]
+    run(cmd + [str(wav)], timeout=3600)
